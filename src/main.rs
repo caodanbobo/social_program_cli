@@ -18,7 +18,6 @@ pub struct UserProfile {
 #[derive(BorshDeserialize, BorshSerialize, Debug)]
 pub struct UserPost {
     pub post_count: u64,
-    pub posts: Vec<Post>,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Debug)]
@@ -62,17 +61,13 @@ impl Post {
 }
 impl UserPost {
     pub fn new() -> Self {
-        Self {
-            post_count: 0,
-            posts: Vec::new(),
-        }
+        Self { post_count: 0 }
     }
-    pub fn post(&mut self, post: Post) {
-        self.posts.push(post);
-        self.post_count = self.posts.len() as u64;
+    pub fn add_post(&mut self) {
+        self.post_count += 1;
     }
-    pub fn query_posts(&self) -> &Vec<Post> {
-        self.posts.as_ref()
+    pub fn get_count(&self) -> u64 {
+        self.post_count
     }
 }
 const USER_PROFILE_SEED: &str = "profile";
@@ -169,15 +164,23 @@ impl SocialClient {
         Ok(())
     }
 
-    pub fn qurey_posts(&self, user_keypair: &Keypair) -> Result<(), Box<dyn std::error::Error>> {
-        let pda = get_pda(
+    pub fn qurey_posts(
+        &self,
+        user_keypair: &Keypair,
+        count: u64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let pda_post = get_pda(
             &self.program_id,
-            &[user_keypair.pubkey().as_ref(), USER_POST_SEED.as_ref()],
+            &[
+                user_keypair.pubkey().as_ref(),
+                USER_POST_SEED.as_ref(),
+                &count.to_le_bytes(),
+            ],
         );
         let query_follower_instruction: Instruction = Instruction::new_with_borsh(
             self.program_id,
             &SocialInstruction::QueryPosts,
-            vec![AccountMeta::new(pda, false)],
+            vec![AccountMeta::new(pda_post, false)],
         );
         self.send_instruction(user_keypair, vec![query_follower_instruction])?;
         Ok(())
@@ -187,15 +190,29 @@ impl SocialClient {
         &self,
         user_keypair: &Keypair,
         content: String,
+        count: u64,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let pda = get_pda(
             &self.program_id,
             &[user_keypair.pubkey().as_ref(), USER_POST_SEED.as_ref()],
         );
+        let pda_post = get_pda(
+            &self.program_id,
+            &[
+                user_keypair.pubkey().as_ref(),
+                USER_POST_SEED.as_ref(),
+                &count.to_le_bytes(),
+            ],
+        );
         let send_post_instruction: Instruction = Instruction::new_with_borsh(
             self.program_id,
             &SocialInstruction::PostContent { content },
-            vec![AccountMeta::new(pda, false)],
+            vec![
+                AccountMeta::new(user_keypair.pubkey(), true),
+                AccountMeta::new(pda, false),
+                AccountMeta::new(pda_post, false),
+                AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            ],
         );
         self.send_instruction(user_keypair, vec![send_post_instruction])?;
         Ok(())
@@ -224,8 +241,8 @@ fn get_pda(program_id: &Pubkey, seed: &[&[u8]]) -> Pubkey {
 }
 fn main() {
     //calculate_data_size();
-    let program_id = "53W1m3utd9wBMAThwa2RR7v4DkXiapbjUG9BUcDkv9WM";
-    users_profile_test(program_id).unwrap();
+    let program_id = "6EvsoziuKmgRJFR27PCodMopyh5CHJnAoKPhKfVNyXzb";
+    //users_profile_test(program_id).unwrap();
     users_post_test(program_id).unwrap();
 }
 
@@ -235,13 +252,15 @@ fn users_post_test(program_id_str: &str) -> Result<(), Box<dyn std::error::Error
     let client = SocialClient::new("http://127.0.0.1:8899", program_id);
 
     //1. initializing user psot
-    // client.initialize_user(&user_keypair, USER_POST_SEED)?;
-    // client.qurey_posts(&user_keypair)?;
+    //client.initialize_user(&user_keypair, USER_POST_SEED)?;
+    //client.qurey_posts(&user_keypair)?;
     //2. send post
     //let content = "12345678901234567890";
-    let content = "09876543210987654321";
-    client.send_posts(&user_keypair, content.to_string())?;
-    client.qurey_posts(&user_keypair)?;
+    let content = "The second post";
+    let count = 2;
+    client.send_posts(&user_keypair, content.to_string(), count)?;
+    client.qurey_posts(&user_keypair, 1)?;
+    client.qurey_posts(&user_keypair, 2)?;
 
     Ok(())
 }
@@ -267,19 +286,10 @@ fn users_profile_test(program_id_str: &str) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-fn _calculate_data_size() {
+fn calculate_data_size() {
     let user_profile = UserPost::new();
     println!(
         "user_profile len is {:?}",
         borsh::to_vec(&user_profile).unwrap().len()
     );
-    let content = "1234567890123456789012345678901234567890".to_string();
-    let post = Post::new(content.clone(), 1 as u64);
-
-    println!(
-        "content len is {:?}",
-        borsh::to_vec(&content).unwrap().len()
-    );
-    println!("ts len is {:?}", borsh::to_vec(&(1 as u64)).unwrap().len());
-    println!("post len is {:?}", borsh::to_vec(&post).unwrap().len());
 }
